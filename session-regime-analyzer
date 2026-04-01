@@ -37,6 +37,11 @@ maxFVGCount      = input.int(10,     "Max FVG",            group="FVG")
 showBarColor = input.bool(true, "Show OR Position Colors", group="Display")
 showPanel    = input.bool(true, "Show Info Panel",          group="Display")
 
+// Time-of-Day Filters
+use_time_filter    = input.bool(true,  "Enable Time Filters",      group="Time Filters")
+no_trade_before    = input.int(15,     "No Trade Before (min into session)", minval=0, group="Time Filters")
+no_trade_after     = input.int(30,     "No Trade After  (min before close)", minval=0, group="Time Filters")
+
 // ================= SESSION =================
 in_session  = not na(time(timeframe.period, session_str, session_tz))
 new_session = in_session and not in_session[1]
@@ -225,19 +230,32 @@ trend_strength = smoothed_score > 80 ? "Strong" : smoothed_score > 60 ? "Moderat
 // Plot score
 plot(smoothed_score, "Trend Score", color=color.white)
 
+// ================= TIME-OF-DAY FILTER =================
+// bars_into_session and bars_to_close are only meaningful in minute timeframes
+bars_per_min  = timeframe.isminutes ? timeframe.multiplier : 1
+bars_in_sess  = na(start_bar) ? 0 : bar_index - start_bar
+
+session_duration_bars = timeframe.isminutes ? math.round(390 / timeframe.multiplier) : 1  // 390 min = 6.5 hr NYSE session
+early_bars  = math.round(no_trade_before / bars_per_min)
+late_cutoff = session_duration_bars - math.round(no_trade_after / bars_per_min)
+
+too_early   = use_time_filter and in_session and bars_in_sess < early_bars
+too_late    = use_time_filter and in_session and bars_in_sess >= late_cutoff
+time_ok     = not too_early and not too_late
+
 // ================= ENTRY LOGIC =================
 
 // ===== TREND ENTRIES =====
-trend_long = is_trend and price_above_or and close > vwap and is_expanding
-trend_short = is_trend and price_below_or and close < vwap and is_expanding
+trend_long = is_trend and price_above_or and close > vwap and is_expanding and time_ok
+trend_short = is_trend and price_below_or and close < vwap and is_expanding and time_ok
 
 // simple pullback confirmation (basic version)
 trend_long_trigger = trend_long and low <= eightLine and close > open
 trend_short_trigger = trend_short and high >= eightLine and close < open
 
 // ===== RANGE ENTRIES =====
-range_long  = is_range and price_inside_or and low  < or_low  and close > or_low
-range_short = is_range and price_inside_or and high > or_high and close < or_high
+range_long  = is_range and price_inside_or and low  < or_low  and close > or_low  and time_ok
+range_short = is_range and price_inside_or and high > or_high and close < or_high and time_ok
 
 plotshape(range_long,  title="Range Long",  style=shape.labelup,   location=location.belowbar, color=color.teal,   textcolor=color.white, text="RL", size=size.small)
 plotshape(range_short, title="Range Short", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, text="RS", size=size.small)
@@ -274,7 +292,7 @@ else
 
 // ================= INFO PANEL =================
 if showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80), border_width=1)
+    var table panel = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80), border_width=1)
 
     // ===== Colors =====
     headerBg = color.new(color.gray, 85)
@@ -338,6 +356,12 @@ if showPanel and barstate.islast
     volColor = vol_surge ? color.green : color.gray
     table.cell(panel, 0, 8, "Vol Ratio", text_halign=align, bgcolor=rowBg2)
     table.cell(panel, 1, 8, str.tostring(math.round(vol_ratio * 100) / 100), text_color=volColor, text_halign=align, bgcolor=rowBg2)
+
+    // ===== TIME FILTER =====
+    timeFilterText  = too_early ? "Too Early" : too_late ? "Too Late" : use_time_filter ? "OK" : "Off"
+    timeFilterColor = too_early or too_late ? color.orange : use_time_filter ? color.green : color.gray
+    table.cell(panel, 0, 9, "Time", text_halign=align, bgcolor=rowBg1)
+    table.cell(panel, 1, 9, timeFilterText, text_color=timeFilterColor, text_halign=align, bgcolor=rowBg1)
 
 // ================= BAR COLOR =================
 barcolor(
