@@ -89,9 +89,9 @@ plot(not or_locked ? or_high : na, color=color.new(color.green, 70))
 plot(not or_locked ? or_low  : na, color=color.new(color.red, 70))
 
 // ================= OR POSITION =================
-price_above_or  = or_locked and close > or_high
-price_below_or  = or_locked and close < or_low
-price_inside_or = or_locked and not price_above_or and not price_below_or
+price_above_or  = in_session and or_locked and close > or_high
+price_below_or  = in_session and or_locked and close < or_low
+price_inside_or = in_session and or_locked and not price_above_or and not price_below_or
 
 // ================= TREND (EMA BASED) =================
 ema_fast = ta.ema(close, ema_fast_len)
@@ -224,8 +224,11 @@ trend_long_trigger = trend_long and low <= eightLine and close > open
 trend_short_trigger = trend_short and high >= eightLine and close < open
 
 // ===== RANGE ENTRIES =====
-range_long = is_range and price_inside_or and low < or_low and close > or_low
+range_long  = is_range and price_inside_or and low  < or_low  and close > or_low
 range_short = is_range and price_inside_or and high > or_high and close < or_high
+
+plotshape(range_long,  title="Range Long",  style=shape.labelup,   location=location.belowbar, color=color.teal,   textcolor=color.white, text="RL", size=size.small)
+plotshape(range_short, title="Range Short", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, text="RS", size=size.small)
 
 // ===== SETUP RECOMMENDATION =====
 setupText = "Wait"
