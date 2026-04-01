@@ -125,8 +125,9 @@ plot(eightLine, "Pullback EMA", color=color.yellow, linewidth=2)
 // ================= HTF CONFLUENCE =================
 daily_ema   = request.security(syminfo.tickerid, "D", ta.ema(close, htf_ema_len), lookahead=barmerge.lookahead_off)
 daily_close = request.security(syminfo.tickerid, "D", close, lookahead=barmerge.lookahead_off)
-htf_bull    = use_htf and daily_close > daily_ema
-htf_bear    = use_htf and daily_close < daily_ema
+daily_ema_slope = daily_ema - daily_ema[3]
+htf_bull = use_htf and daily_close > daily_ema and daily_ema_slope > 0
+htf_bear = use_htf and daily_close < daily_ema and daily_ema_slope < 0
 
 
 // ================= EXPANSION =================
@@ -209,7 +210,7 @@ else if close < vwap and ema_fast < vwap
 cross_penalty = math.min(vwap_cross_count, 10)
 if close > vwap
     vwap_score -= cross_penalty
-else
+else if close < vwap
     vwap_score += cross_penalty
 
 // OR component  (+/-25)
@@ -224,7 +225,7 @@ expansion_score = 0.0
 if is_expanding
     expansion_score := close > vwap ? 25 : -25
 else if is_compressed
-    expansion_score := 0
+    expansion_score := -10
 
 // Momentum  (+/-25)
 ema_slope = ema_fast - ema_fast[5]
