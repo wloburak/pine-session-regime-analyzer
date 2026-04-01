@@ -145,11 +145,11 @@ bearishFVG = bar_index >= 2 and high < low[2]
 var bullFVGs = array.new_box()
 var bearFVGs = array.new_box()
 
-if bullishFVG and showFVG
+if bullishFVG and showFVG and in_session
     b = box.new(bar_index[2], low, bar_index, high[2], bgcolor=color.new(color.green, 80), border_color=na)
     array.push(bullFVGs, b)
 
-if bearishFVG and showFVG
+if bearishFVG and showFVG and in_session
     b = box.new(bar_index[2], low[2], bar_index, high, bgcolor=color.new(color.red, 80), border_color=na)
     array.push(bearFVGs, b)
 
@@ -303,8 +303,11 @@ setupColor = smoothed_score > 60  ? color.green  :
              math.abs(smoothed_score) < 40 ? color.teal : color.gray
 
 // ================= INFO PANEL =================
+// Declared at top-level scope so Pine Script initializes the table exactly once
+// (placing `var table` inside a conditional can cause reset on the first matching bar).
+var table panel = table.new(position.top_right, 2, 11, bgcolor=color.new(color.black, 80), border_width=1)
+
 if showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 11, bgcolor=color.new(color.black, 80), border_width=1)
 
     // ===== Colors =====
     headerBg = color.new(color.gray, 85)
