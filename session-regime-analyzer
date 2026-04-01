@@ -1,0 +1,316 @@
+//@version=6
+indicator("Session Regime Analyzer", overlay=true)
+
+// ================= SESSION =================
+session_str = "0930-1600"
+session_tz  = "America/New_York"
+
+in_session  = not na(time(timeframe.period, session_str, session_tz))
+new_session = in_session and not in_session[1]
+
+plotshape(new_session, title="Session Start", style=shape.triangleup, location=location.bottom, color=color.yellow, size=size.small)
+
+// ================= INPUTS =================
+or_minutes  = input.int(15, "Opening Range Minutes")
+lookback    = input.int(10, "VWAP Cross Lookback")
+
+showFVG     = input.bool(true, "Show FVG")
+fvgLookback = input.int(50, "FVG Lookback")
+showBarColor = input.bool(true, "Show OR Position Colors")
+
+// ================= OR VARIABLES =================
+var float or_high = na
+var float or_low  = na
+var int bar_count = 0
+var bool or_locked = false
+var int start_bar = na
+
+var line high_line = na
+var line low_line  = na
+
+// ================= VWAP =================
+vwap = ta.vwap
+plot(vwap, "VWAP", color=color.blue, linewidth=2)
+
+vwap_cross = ta.cross(close, vwap)
+vwap_cross_count = math.sum(vwap_cross ? 1 : 0, lookback)
+
+// ================= RESET =================
+if new_session
+    or_high := high
+    or_low  := low
+    bar_count := 0
+    or_locked := false
+    start_bar := bar_index
+
+    if not na(high_line)
+        line.delete(high_line)
+    if not na(low_line)
+        line.delete(low_line)
+
+// ================= BUILD OR =================
+if in_session and not or_locked
+    bar_count += 1
+    or_high := math.max(or_high, high)
+    or_low  := math.min(or_low, low)
+
+// ================= LOCK OR =================
+bars_needed = math.round(or_minutes / timeframe.multiplier)
+
+if in_session and not or_locked and bar_count >= bars_needed
+    or_locked := true
+
+    high_line := line.new(start_bar, or_high, bar_index, or_high, extend=extend.right, color=color.green, width=2)
+    low_line  := line.new(start_bar, or_low,  bar_index, or_low,  extend=extend.right, color=color.red, width=2)
+
+// ================= OR BUILD VISUAL =================
+plot(not or_locked ? or_high : na, color=color.new(color.green, 70))
+plot(not or_locked ? or_low  : na, color=color.new(color.red, 70))
+
+// ================= OR POSITION =================
+price_above_or  = or_locked and close > or_high
+price_below_or  = or_locked and close < or_low
+price_inside_or = or_locked and not price_above_or and not price_below_or
+
+// ================= TREND (EMA BASED) =================
+ema_fast = ta.ema(close, 20)
+ema_slow = ta.ema(close, 50)
+
+isUptrend   = ema_fast > ema_slow
+isDowntrend = ema_fast < ema_slow
+
+// bgcolor(
+//      showTrendBg and isUptrend ? color.new(color.green, 90) :
+//      showTrendBg and isDowntrend ? color.new(color.red, 90) : na
+// )
+
+// ================= 5m 8 EMA =================
+eightLine = request.security(syminfo.tickerid, "5", ta.ema(close, 8))
+plot(eightLine, "5m 8 EMA", color=color.yellow, linewidth=2)
+
+
+// ================= EXPANSION =================
+atr_len = input.int(14, "ATR Length")
+atr = ta.atr(atr_len)
+
+current_range = high - low
+expansion_ratio = current_range / atr
+
+is_expanding = expansion_ratio > 1.2
+is_compressed = expansion_ratio < 0.8
+
+// ================= FVG CLEAN =================
+showOnlyUnfilled = input.bool(true, "Only Unfilled FVG")
+limitRecentFVGs  = input.bool(false, "Limit FVG Count")
+maxFVGCount      = input.int(10, "Max FVG")
+
+bullishFVG = bar_index >= 2 and low > high[2]
+bearishFVG = bar_index >= 2 and high < low[2]
+
+var bullFVGs = array.new_box()
+var bearFVGs = array.new_box()
+
+if bullishFVG and showFVG
+    b = box.new(bar_index[2], high[2], bar_index, low, bgcolor=color.new(color.green, 80), border_color=na)
+    array.push(bullFVGs, b)
+
+if bearishFVG and showFVG
+    b = box.new(bar_index[2], low[2], bar_index, high, bgcolor=color.new(color.red, 80), border_color=na)
+    array.push(bearFVGs, b)
+
+// Remove filled
+if showOnlyUnfilled
+    if array.size(bullFVGs) > 0
+        for i = array.size(bullFVGs) - 1 to 0
+            b = array.get(bullFVGs, i)
+            if low <= box.get_top(b)
+                box.delete(b)
+                array.remove(bullFVGs, i)
+
+    if array.size(bearFVGs) > 0
+        for i = array.size(bearFVGs) - 1 to 0
+            b = array.get(bearFVGs, i)
+            if high >= box.get_bottom(b)
+                box.delete(b)
+                array.remove(bearFVGs, i)
+
+// Remove old
+while array.size(bullFVGs) > 0 and bar_index - box.get_left(array.get(bullFVGs, 0)) > fvgLookback
+    box.delete(array.shift(bullFVGs))
+
+while array.size(bearFVGs) > 0 and bar_index - box.get_left(array.get(bearFVGs, 0)) > fvgLookback
+    box.delete(array.shift(bearFVGs))
+
+// Limit count
+if limitRecentFVGs
+    while array.size(bullFVGs) > maxFVGCount
+        box.delete(array.shift(bullFVGs))
+    while array.size(bearFVGs) > maxFVGCount
+        box.delete(array.shift(bearFVGs))
+
+// Extend
+if array.size(bullFVGs) > 0
+    for i = 0 to array.size(bullFVGs) - 1
+        box.set_right(array.get(bullFVGs, i), bar_index)
+
+if array.size(bearFVGs) > 0
+    for i = 0 to array.size(bearFVGs) - 1
+        box.set_right(array.get(bearFVGs, i), bar_index)
+
+// ================= TREND SCORE =================
+
+// VWAP component
+vwap_score = 0.0
+if close > vwap and ema_fast > vwap
+    vwap_score := 15
+else if close < vwap and ema_fast < vwap
+    vwap_score := 15
+vwap_score -= math.min(vwap_cross_count, 10)
+
+// OR component
+or_score = 0.0
+or_score += (price_above_or or price_below_or) ? 20 : 0
+or_score -= price_inside_or ? 10 : 0
+
+// Expansion component
+expansion_score = 0.0
+expansion_score += is_expanding ? 20 : 0
+expansion_score -= is_compressed ? 10 : 0
+
+// Momentum
+ema_slope = ema_fast - ema_fast[5]
+momentum_score = math.abs(ema_slope) > atr * 0.1 ? 15 : 0
+
+// Total
+raw_score = vwap_score + or_score + expansion_score + momentum_score
+trend_score = math.max(0, math.min(100, raw_score))
+
+// Smooth
+smoothed_score = ta.ema(trend_score, 5)
+
+// Regime
+is_trend = smoothed_score > 60
+is_range = smoothed_score < 40
+
+trend_strength = smoothed_score > 80 ? "Strong" : smoothed_score > 60 ? "Moderate" : smoothed_score < 20 ? "Dead" : smoothed_score < 40 ? "Weak" : "Neutral"
+
+// Plot score
+plot(smoothed_score, "Trend Score", color=color.white)
+
+// ================= ENTRY LOGIC =================
+
+// ===== TREND ENTRIES =====
+trend_long = is_trend and price_above_or and close > vwap and is_expanding
+trend_short = is_trend and price_below_or and close < vwap and is_expanding
+
+// simple pullback confirmation (basic version)
+trend_long_trigger = trend_long and low <= eightLine and close > open
+trend_short_trigger = trend_short and high >= eightLine and close < open
+
+// ===== RANGE ENTRIES =====
+range_long = is_range and price_inside_or and low < or_low and close > or_low
+range_short = is_range and price_inside_or and high > or_high and close < or_high
+
+// ===== SETUP RECOMMENDATION =====
+setupText = "Wait"
+setupColor = color.gray
+
+if is_trend
+    if price_above_or
+        setupText := "Trend → Wait Pullback, LONG"
+        setupColor := color.green
+    else if price_below_or
+        setupText := "Trend → Wait Pullback, SHORT"
+        setupColor := color.red
+    else
+        setupText := "Trend → Wait OR Break"
+        setupColor := color.gray
+
+else if is_range
+    if price_inside_or
+        setupText := "Range → Fade High/Low (No Trades)"
+        setupColor := color.gray
+    else if price_below_or
+        setupText := "Range → Wait Bounce, SHORT"
+        setupColor := color.teal
+    else if price_above_or
+        setupText := "Range → Wait Pullback, LONG"
+        setupColor := color.teal
+
+else
+    setupText := "No Trade"
+    setupColor := color.gray
+
+// ================= INFO PANEL =================
+showPanel = input.bool(true, "Show Info Panel")
+
+if showPanel and barstate.islast
+    var table panel = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), border_width=1)
+
+    // ===== Colors =====
+    headerBg = color.new(color.gray, 85)
+    rowBg1   = color.new(color.black, 85)
+    rowBg2   = color.new(color.black, 75)
+
+    // ===== Alignment =====
+    align = text.align_left
+
+
+    // ===== REGIME TEXT =====
+    regimeText = is_trend ? "Trend" : is_range ? "Chop" : "Neutral"
+    regimeColor = is_trend ? color.green : is_range ? color.red : color.gray
+
+    // ===== VWAP STATE =====
+    vwapState = close > vwap ? "Above" : "Below"
+
+    // ===== OR POSITION =====
+    orState = price_above_or ? "Above" :
+              price_below_or ? "Below" : "Inside"
+
+    // ===== EXPANSION =====
+    expansionState = is_expanding ? "Expanding" :
+                     is_compressed ? "Compressed" : "Normal"
+
+    // ===== HEADER =====
+    table.cell(panel, 0, 0, "Metric", text_color=color.white, bgcolor=headerBg, text_halign=align)
+    table.cell(panel, 1, 0, "Value",  text_color=color.white, bgcolor=headerBg, text_halign=align)
+
+    // ===== SCORE =====
+    scoreColor = smoothed_score > 60 ? color.green : smoothed_score < 40 ? color.red : color.gray
+    table.cell(panel, 0, 1, "Score", text_halign=align, bgcolor=rowBg1)
+    table.cell(panel, 1, 1, str.tostring(math.round(smoothed_score)), text_color=scoreColor, text_halign=align, bgcolor=rowBg1)
+
+    // ===== STRENGTH =====
+    strengthColor = smoothed_score > 80 ? color.green : smoothed_score > 60 ? color.lime : smoothed_score < 20 ? color.red : smoothed_score < 40 ? color.orange : color.gray
+    table.cell(panel, 0, 2, "Strength", text_halign=align, bgcolor=rowBg2)
+    table.cell(panel, 1, 2, trend_strength, text_color=strengthColor, text_halign=align, bgcolor=rowBg2)
+
+    // ===== REGIME =====
+    table.cell(panel, 0, 3, "Regime", text_halign=align, bgcolor=rowBg1)
+    table.cell(panel, 1, 3, regimeText, text_color=regimeColor, text_halign=align, bgcolor=rowBg1)
+
+    // ===== VWAP =====
+    table.cell(panel, 0, 4, "VWAP", text_halign=align, bgcolor=rowBg2)
+    table.cell(panel, 1, 4, vwapState, text_color=color.blue, text_halign=align, bgcolor=rowBg2)
+
+    // ===== OR POSITION =====
+    table.cell(panel, 0, 5, "OR Pos", text_halign=align, bgcolor=rowBg1)
+    table.cell(panel, 1, 5, orState, text_halign=align, bgcolor=rowBg1)
+
+    // ===== EXPANSION =====
+    table.cell(panel, 0, 6, "Expansion", text_halign=align, bgcolor=rowBg2)
+    table.cell(panel, 1, 6, expansionState, text_halign=align, bgcolor=rowBg2)
+
+    // ===== SETUP =====
+    table.cell(panel, 0, 7, "Setup", text_halign=align, bgcolor=rowBg1)
+    table.cell(panel, 1, 7, setupText, text_color=setupColor, text_halign=align, bgcolor=rowBg1)
+
+// ================= BAR COLOR =================
+barcolor(
+     showBarColor and in_session and or_locked ?
+         price_above_or ? color.green :
+         price_below_or ? color.red :
+         price_inside_or ? color.gray :
+         na
+     : na
+)
