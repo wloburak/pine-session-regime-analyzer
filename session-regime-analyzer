@@ -15,12 +15,16 @@ ema_slow_len = input.int(50, "EMA Slow Length", minval=1, group="EMA")
 ema_tf       = input.timeframe("5", "Pullback EMA Timeframe", group="EMA")
 
 // ATR / Expansion
-atr_len             = input.int(14,  "ATR Length",               minval=1,   group="ATR / Expansion")
-expansion_threshold = input.float(1.2, "Expansion Threshold",    minval=0.1, step=0.1, group="ATR / Expansion")
-compression_threshold = input.float(0.8, "Compression Threshold", minval=0.1, step=0.1, group="ATR / Expansion")
+atr_len               = input.int(14,    "ATR Length",               minval=1,   group="ATR / Expansion")
+expansion_threshold   = input.float(1.2, "Expansion Threshold",    minval=0.1, step=0.1, group="ATR / Expansion")
+compression_threshold = input.float(0.8, "Compression Threshold",  minval=0.1, step=0.1, group="ATR / Expansion")
 
 // VWAP
 lookback = input.int(10, "VWAP Cross Lookback", group="VWAP")
+
+// Volume
+vol_sma_len         = input.int(20,   "Volume SMA Length",       minval=1,   group="Volume")
+vol_ratio_threshold = input.float(1.5, "Volume Surge Threshold", minval=1.0, step=0.1, group="Volume")
 
 // FVG
 showFVG          = input.bool(true,  "Show FVG",          group="FVG")
@@ -173,6 +177,11 @@ if array.size(bearFVGs) > 0
     for i = 0 to array.size(bearFVGs) - 1
         box.set_right(array.get(bearFVGs, i), bar_index)
 
+// ================= VOLUME RATIO =================
+vol_sma   = ta.sma(volume, vol_sma_len)
+vol_ratio = vol_sma > 0 ? volume / vol_sma : 1.0
+vol_surge = vol_ratio >= vol_ratio_threshold
+
 // ================= TREND SCORE =================
 
 // VWAP component
@@ -197,8 +206,11 @@ expansion_score -= is_compressed ? 10 : 0
 ema_slope = ema_fast - ema_fast[5]
 momentum_score = math.abs(ema_slope) > atr * 0.1 ? 25 : 0
 
+// Volume
+volume_score = vol_surge ? 10 : 0
+
 // Total
-raw_score = vwap_score + or_score + expansion_score + momentum_score
+raw_score = vwap_score + or_score + expansion_score + momentum_score + volume_score
 trend_score = math.max(0, math.min(100, raw_score))
 
 // Smooth
@@ -262,7 +274,7 @@ else
 
 // ================= INFO PANEL =================
 if showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), border_width=1)
+    var table panel = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80), border_width=1)
 
     // ===== Colors =====
     headerBg = color.new(color.gray, 85)
@@ -321,6 +333,11 @@ if showPanel and barstate.islast
     // ===== SETUP =====
     table.cell(panel, 0, 7, "Setup", text_halign=align, bgcolor=rowBg1)
     table.cell(panel, 1, 7, setupText, text_color=setupColor, text_halign=align, bgcolor=rowBg1)
+
+    // ===== VOLUME =====
+    volColor = vol_surge ? color.green : color.gray
+    table.cell(panel, 0, 8, "Vol Ratio", text_halign=align, bgcolor=rowBg2)
+    table.cell(panel, 1, 8, str.tostring(math.round(vol_ratio * 100) / 100), text_color=volColor, text_halign=align, bgcolor=rowBg2)
 
 // ================= BAR COLOR =================
 barcolor(
