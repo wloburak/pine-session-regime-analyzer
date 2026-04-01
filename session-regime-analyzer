@@ -198,47 +198,64 @@ vol_ratio = vol_sma > 0 ? volume / vol_sma : 1.0
 vol_surge = vol_ratio >= vol_ratio_threshold
 
 // ================= TREND SCORE =================
+// Signed score: positive = bullish conviction, negative = bearish conviction
 
-// VWAP component
+// VWAP component  (+/-25)
 vwap_score = 0.0
 if close > vwap and ema_fast > vwap
     vwap_score := 25
 else if close < vwap and ema_fast < vwap
-    vwap_score := 25
-vwap_score -= math.min(vwap_cross_count, 10)
+    vwap_score := -25
+cross_penalty = math.min(vwap_cross_count, 10)
+vwap_score -= close > vwap ? cross_penalty : -cross_penalty
 
-// OR component
+// OR component  (+/-25)
 or_score = 0.0
-or_score += (price_above_or or price_below_or) ? 25 : 0
-or_score -= price_inside_or ? 10 : 0
+if price_above_or
+    or_score := 25
+else if price_below_or
+    or_score := -25
 
-// Expansion component
+// Expansion component  (+/-25)
 expansion_score = 0.0
-expansion_score += is_expanding ? 25 : 0
-expansion_score -= is_compressed ? 10 : 0
+if is_expanding
+    expansion_score := close > vwap ? 25 : -25
+else if is_compressed
+    expansion_score := 0
 
-// Momentum
+// Momentum  (+/-25)
 ema_slope = ema_fast - ema_fast[5]
-momentum_score = math.abs(ema_slope) > atr * 0.1 ? 25 : 0
+momentum_score = 0.0
+if math.abs(ema_slope) > atr * 0.1
+    momentum_score := ema_slope > 0 ? 25 : -25
 
-// Volume
-volume_score = vol_surge ? 10 : 0
+// Volume  (+/-10)
+volume_score = 0.0
+if vol_surge
+    volume_score := close > vwap ? 10 : -10
 
-// HTF Confluence
-htf_score = (use_htf and (htf_bull or htf_bear)) ? 10 : 0
+// HTF Confluence  (+/-10)
+htf_score = 0.0
+if use_htf
+    htf_score := htf_bull ? 10 : htf_bear ? -10 : 0
 
-// Total
-raw_score = vwap_score + or_score + expansion_score + momentum_score + volume_score + htf_score
-trend_score = math.max(0, math.min(100, raw_score))
+// Total  (range: approximately -120 to +120, clamped to -100/+100)
+raw_score    = vwap_score + or_score + expansion_score + momentum_score + volume_score + htf_score
+trend_score  = math.max(-100, math.min(100, raw_score))
 
 // Smooth
 smoothed_score = ta.ema(trend_score, 5)
 
 // Regime
-is_trend = smoothed_score > 60
-is_range = smoothed_score < 40
+is_trend = math.abs(smoothed_score) > 60
+is_range = math.abs(smoothed_score) < 40
+is_bull  = smoothed_score > 0
+is_bear  = smoothed_score < 0
 
-trend_strength = smoothed_score > 80 ? "Strong" : smoothed_score > 60 ? "Moderate" : smoothed_score < 20 ? "Dead" : smoothed_score < 40 ? "Weak" : "Neutral"
+trend_strength = math.abs(smoothed_score) > 80 ? "Strong"   :
+                 math.abs(smoothed_score) > 60 ? "Moderate" :
+                 math.abs(smoothed_score) < 20 ? "Dead"     :
+                 math.abs(smoothed_score) < 40 ? "Weak"     : "Neutral"
 
 // Plot score
 plot(smoothed_score, "Trend Score", color=color.white)
@@ -259,11 +276,11 @@ time_ok     = not too_early and not too_late
 // ================= ENTRY LOGIC =================
 
 // ===== TREND ENTRIES =====
-trend_long = is_trend and price_above_or and close > vwap and is_expanding and time_ok
-trend_short = is_trend and price_below_or and close < vwap and is_expanding and time_ok
+trend_long  = is_trend and is_bull and price_above_or and close > vwap and is_expanding and time_ok
+trend_short = is_trend and is_bear and price_below_or and close < vwap and is_expanding and time_ok
 
 // simple pullback confirmation (basic version)
-trend_long_trigger = trend_long and low <= eightLine and close > open
+trend_long_trigger  = trend_long  and low  <= eightLine and close > open
 trend_short_trigger = trend_short and high >= eightLine and close < open
 
 // ===== RANGE ENTRIES =====
@@ -274,34 +291,16 @@ plotshape(range_long,  title="Range Long",  style=shape.labelup,   location=loca
 plotshape(range_short, title="Range Short", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, text="RS", size=size.small)
 
 // ===== SETUP RECOMMENDATION =====
-setupText = "Wait"
-setupColor = color.gray
+setupText  = smoothed_score > 60  ? (price_above_or ? "Trend → Wait Pullback, LONG"  : "Trend → Wait OR Break") :
+             smoothed_score < -60 ? (price_below_or ? "Trend → Wait Pullback, SHORT" : "Trend → Wait OR Break") :
+             math.abs(smoothed_score) < 40 ?
+                 (price_inside_or ? "Range → Fade High/Low (No Trades)" :
+                  price_below_or  ? "Range → Wait Bounce, SHORT"        :
+                  price_above_or  ? "Range → Wait Pullback, LONG"       : "Wait") : "No Trade"
 
-if is_trend
-    if price_above_or
-        setupText := "Trend → Wait Pullback, LONG"
-        setupColor := color.green
-    else if price_below_or
-        setupText := "Trend → Wait Pullback, SHORT"
-        setupColor := color.red
-    else
-        setupText := "Trend → Wait OR Break"
-        setupColor := color.gray
-
-else if is_range
-    if price_inside_or
-        setupText := "Range → Fade High/Low (No Trades)"
-        setupColor := color.gray
-    else if price_below_or
-        setupText := "Range → Wait Bounce, SHORT"
-        setupColor := color.teal
-    else if price_above_or
-        setupText := "Range → Wait Pullback, LONG"
-        setupColor := color.teal
-
-else
-    setupText := "No Trade"
-    setupColor := color.gray
+setupColor = smoothed_score > 60  ? color.green  :
+             smoothed_score < -60 ? color.red     :
+             math.abs(smoothed_score) < 40 ? color.teal : color.gray
 
 // ================= INFO PANEL =================
 if showPanel and barstate.islast
@@ -317,8 +316,8 @@ if showPanel and barstate.islast
 
 
     // ===== REGIME TEXT =====
-    regimeText = is_trend ? "Trend" : is_range ? "Chop" : "Neutral"
-    regimeColor = is_trend ? color.green : is_range ? color.red : color.gray
+    regimeText  = is_trend ? (is_bull ? "Trend ▲" : "Trend ▼") : is_range ? "Chop" : "Neutral"
+    regimeColor = is_trend ? (is_bull ? color.green : color.red) : is_range ? color.orange : color.gray
 
     // ===== VWAP STATE =====
     vwapState = close > vwap ? "Above" : "Below"
@@ -336,12 +335,12 @@ if showPanel and barstate.islast
     table.cell(panel, 1, 0, "Value",  text_color=color.white, bgcolor=headerBg, text_halign=align)
 
     // ===== SCORE =====
-    scoreColor = smoothed_score > 60 ? color.green : smoothed_score < 40 ? color.red : color.gray
+    scoreColor = smoothed_score > 60 ? color.green : smoothed_score < -60 ? color.red : smoothed_score > 0 ? color.lime : smoothed_score < 0 ? color.orange : color.gray
     table.cell(panel, 0, 1, "Score", text_halign=align, bgcolor=rowBg1)
     table.cell(panel, 1, 1, str.tostring(math.round(smoothed_score)), text_color=scoreColor, text_halign=align, bgcolor=rowBg1)
 
     // ===== STRENGTH =====
-    strengthColor = smoothed_score > 80 ? color.green : smoothed_score > 60 ? color.lime : smoothed_score < 20 ? color.red : smoothed_score < 40 ? color.orange : color.gray
+    strengthColor = math.abs(smoothed_score) > 80 ? color.green : math.abs(smoothed_score) > 60 ? color.lime : math.abs(smoothed_score) < 20 ? color.red : math.abs(smoothed_score) < 40 ? color.orange : color.gray
     table.cell(panel, 0, 2, "Strength", text_halign=align, bgcolor=rowBg2)
     table.cell(panel, 1, 2, trend_strength, text_color=strengthColor, text_halign=align, bgcolor=rowBg2)
 
