@@ -37,8 +37,8 @@ vwap_cross_count = math.sum(vwap_cross ? 1 : 0, lookback)
 
 // ================= RESET =================
 if new_session
-    or_high := high
-    or_low  := low
+    or_high   := na
+    or_low    := na
     bar_count := 0
     or_locked := false
     start_bar := bar_index
@@ -51,8 +51,8 @@ if new_session
 // ================= BUILD OR =================
 if in_session and not or_locked
     bar_count += 1
-    or_high := math.max(or_high, high)
-    or_low  := math.min(or_low, low)
+    or_high := na(or_high) ? high : math.max(or_high, high)
+    or_low  := na(or_low)  ? low  : math.min(or_low, low)
 
 // ================= LOCK OR =================
 bars_needed = math.round(or_minutes / timeframe.multiplier)
@@ -111,7 +111,7 @@ var bullFVGs = array.new_box()
 var bearFVGs = array.new_box()
 
 if bullishFVG and showFVG
-    b = box.new(bar_index[2], high[2], bar_index, low, bgcolor=color.new(color.green, 80), border_color=na)
+    b = box.new(bar_index[2], low, bar_index, high[2], bgcolor=color.new(color.green, 80), border_color=na)
     array.push(bullFVGs, b)
 
 if bearishFVG and showFVG
@@ -162,24 +162,24 @@ if array.size(bearFVGs) > 0
 // VWAP component
 vwap_score = 0.0
 if close > vwap and ema_fast > vwap
-    vwap_score := 15
+    vwap_score := 25
 else if close < vwap and ema_fast < vwap
-    vwap_score := 15
+    vwap_score := 25
 vwap_score -= math.min(vwap_cross_count, 10)
 
 // OR component
 or_score = 0.0
-or_score += (price_above_or or price_below_or) ? 20 : 0
+or_score += (price_above_or or price_below_or) ? 25 : 0
 or_score -= price_inside_or ? 10 : 0
 
 // Expansion component
 expansion_score = 0.0
-expansion_score += is_expanding ? 20 : 0
+expansion_score += is_expanding ? 25 : 0
 expansion_score -= is_compressed ? 10 : 0
 
 // Momentum
 ema_slope = ema_fast - ema_fast[5]
-momentum_score = math.abs(ema_slope) > atr * 0.1 ? 15 : 0
+momentum_score = math.abs(ema_slope) > atr * 0.1 ? 25 : 0
 
 // Total
 raw_score = vwap_score + or_score + expansion_score + momentum_score
