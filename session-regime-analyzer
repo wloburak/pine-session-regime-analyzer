@@ -207,7 +207,10 @@ if close > vwap and ema_fast > vwap
 else if close < vwap and ema_fast < vwap
     vwap_score := -25
 cross_penalty = math.min(vwap_cross_count, 10)
-vwap_score -= close > vwap ? cross_penalty : -cross_penalty
+if close > vwap
+    vwap_score -= cross_penalty
+else
+    vwap_score += cross_penalty
 
 // OR component  (+/-25)
 or_score = 0.0
@@ -273,19 +276,22 @@ too_early   = use_time_filter and in_session and bars_in_sess < early_bars
 too_late    = use_time_filter and in_session and bars_in_sess >= late_cutoff
 time_ok     = not too_early and not too_late
 
+// ================= DEAD ZONE =================
+in_dead_zone = math.abs(smoothed_score) < 15
+
 // ================= ENTRY LOGIC =================
 
 // ===== TREND ENTRIES =====
-trend_long  = is_trend and is_bull and price_above_or and close > vwap and is_expanding and time_ok
-trend_short = is_trend and is_bear and price_below_or and close < vwap and is_expanding and time_ok
+trend_long  = is_trend and is_bull and price_above_or and close > vwap and is_expanding and math.abs(smoothed_score) > 75 and time_ok
+trend_short = is_trend and is_bear and price_below_or and close < vwap and is_expanding and math.abs(smoothed_score) > 75 and time_ok
 
-// simple pullback confirmation (basic version)
-trend_long_trigger  = trend_long  and low  <= eightLine and close > open
-trend_short_trigger = trend_short and high >= eightLine and close < open
+// pullback confirmation + continuation candle (close > high[1] / close < low[1])
+trend_long_trigger  = trend_long  and low  <= eightLine and close > open and close > high[1]
+trend_short_trigger = trend_short and high >= eightLine and close < open and close < low[1]
 
-// ===== RANGE ENTRIES =====
-range_long  = is_range and price_inside_or and low  < or_low  and close > or_low  and time_ok
-range_short = is_range and price_inside_or and high > or_high and close < or_high and time_ok
+// ===== RANGE ENTRIES (reclaim logic) =====
+range_long  = is_range and not in_dead_zone and low < or_low  and close > or_low  and time_ok
+range_short = is_range and not in_dead_zone and high > or_high and close < or_high and time_ok
 
 plotshape(range_long,  title="Range Long",  style=shape.labelup,   location=location.belowbar, color=color.teal,   textcolor=color.white, text="RL", size=size.small)
 plotshape(range_short, title="Range Short", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, text="RS", size=size.small)
@@ -294,7 +300,7 @@ plotshape(range_short, title="Range Short", style=shape.labeldown, location=loca
 setupText  = smoothed_score > 60  ? (price_above_or ? "Trend → Wait Pullback, LONG"  : "Trend → Wait OR Break") :
              smoothed_score < -60 ? (price_below_or ? "Trend → Wait Pullback, SHORT" : "Trend → Wait OR Break") :
              math.abs(smoothed_score) < 40 ?
-                 (price_inside_or ? "Range → Fade High/Low (No Trades)" :
+                 (price_inside_or ? "Range → Wait Edges" :
                   price_below_or  ? "Range → Wait Bounce, SHORT"        :
                   price_above_or  ? "Range → Wait Pullback, LONG"       : "Wait") : "No Trade"
 
