@@ -42,6 +42,10 @@ use_time_filter    = input.bool(true,  "Enable Time Filters",      group="Time F
 no_trade_before    = input.int(15,     "No Trade Before (min into session)", minval=0, group="Time Filters")
 no_trade_after     = input.int(30,     "No Trade After  (min before close)", minval=0, group="Time Filters")
 
+// HTF Confluence
+use_htf         = input.bool(true,  "Enable Daily Bias",           group="HTF Confluence")
+htf_ema_len     = input.int(20,     "Daily EMA Length", minval=1,  group="HTF Confluence")
+
 // ================= SESSION =================
 in_session  = not na(time(timeframe.period, session_str, session_tz))
 new_session = in_session and not in_session[1]
@@ -117,6 +121,12 @@ isDowntrend = ema_fast < ema_slow
 // ================= 5m 8 EMA =================
 eightLine = request.security(syminfo.tickerid, ema_tf, ta.ema(close, 8), lookahead=barmerge.lookahead_off)
 plot(eightLine, "Pullback EMA", color=color.yellow, linewidth=2)
+
+// ================= HTF CONFLUENCE =================
+daily_ema   = request.security(syminfo.tickerid, "D", ta.ema(close, htf_ema_len), lookahead=barmerge.lookahead_off)
+daily_close = request.security(syminfo.tickerid, "D", close, lookahead=barmerge.lookahead_off)
+htf_bull    = use_htf and daily_close > daily_ema
+htf_bear    = use_htf and daily_close < daily_ema
 
 
 // ================= EXPANSION =================
@@ -214,8 +224,11 @@ momentum_score = math.abs(ema_slope) > atr * 0.1 ? 25 : 0
 // Volume
 volume_score = vol_surge ? 10 : 0
 
+// HTF Confluence
+htf_score = (use_htf and (htf_bull or htf_bear)) ? 10 : 0
+
 // Total
-raw_score = vwap_score + or_score + expansion_score + momentum_score + volume_score
+raw_score = vwap_score + or_score + expansion_score + momentum_score + volume_score + htf_score
 trend_score = math.max(0, math.min(100, raw_score))
 
 // Smooth
@@ -292,7 +305,7 @@ else
 
 // ================= INFO PANEL =================
 if showPanel and barstate.islast
-    var table panel = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80), border_width=1)
+    var table panel = table.new(position.top_right, 2, 11, bgcolor=color.new(color.black, 80), border_width=1)
 
     // ===== Colors =====
     headerBg = color.new(color.gray, 85)
@@ -362,6 +375,12 @@ if showPanel and barstate.islast
     timeFilterColor = too_early or too_late ? color.orange : use_time_filter ? color.green : color.gray
     table.cell(panel, 0, 9, "Time", text_halign=align, bgcolor=rowBg1)
     table.cell(panel, 1, 9, timeFilterText, text_color=timeFilterColor, text_halign=align, bgcolor=rowBg1)
+
+    // ===== DAILY BIAS =====
+    dailyBiasText  = not use_htf ? "Off" : htf_bull ? "Bullish" : htf_bear ? "Bearish" : "Neutral"
+    dailyBiasColor = not use_htf ? color.gray : htf_bull ? color.green : htf_bear ? color.red : color.gray
+    table.cell(panel, 0, 10, "Daily Bias", text_halign=align, bgcolor=rowBg2)
+    table.cell(panel, 1, 10, dailyBiasText, text_color=dailyBiasColor, text_halign=align, bgcolor=rowBg2)
 
 // ================= BAR COLOR =================
 barcolor(
