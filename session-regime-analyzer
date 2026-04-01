@@ -1,22 +1,42 @@
 //@version=6
 indicator("Session Regime Analyzer", overlay=true)
 
-// ================= SESSION =================
-session_str = "0930-1600"
-session_tz  = "America/New_York"
+// ================= INPUTS =================
+// Session
+session_str = input.string("0930-1600", "Session Hours",    group="Session")
+session_tz  = input.string("America/New_York", "Session Timezone", group="Session")
 
+// Opening Range
+or_minutes   = input.int(15, "Opening Range Minutes", group="Opening Range")
+
+// EMA
+ema_fast_len = input.int(20, "EMA Fast Length", minval=1, group="EMA")
+ema_slow_len = input.int(50, "EMA Slow Length", minval=1, group="EMA")
+
+// ATR / Expansion
+atr_len             = input.int(14,  "ATR Length",               minval=1,   group="ATR / Expansion")
+expansion_threshold = input.float(1.2, "Expansion Threshold",    minval=0.1, step=0.1, group="ATR / Expansion")
+compression_threshold = input.float(0.8, "Compression Threshold", minval=0.1, step=0.1, group="ATR / Expansion")
+
+// VWAP
+lookback = input.int(10, "VWAP Cross Lookback", group="VWAP")
+
+// FVG
+showFVG          = input.bool(true,  "Show FVG",          group="FVG")
+fvgLookback      = input.int(50,     "FVG Lookback",       group="FVG")
+showOnlyUnfilled = input.bool(true,  "Only Unfilled FVG",  group="FVG")
+limitRecentFVGs  = input.bool(false, "Limit FVG Count",    group="FVG")
+maxFVGCount      = input.int(10,     "Max FVG",            group="FVG")
+
+// Display
+showBarColor = input.bool(true, "Show OR Position Colors", group="Display")
+showPanel    = input.bool(true, "Show Info Panel",          group="Display")
+
+// ================= SESSION =================
 in_session  = not na(time(timeframe.period, session_str, session_tz))
 new_session = in_session and not in_session[1]
 
 plotshape(new_session, title="Session Start", style=shape.triangleup, location=location.bottom, color=color.yellow, size=size.small)
-
-// ================= INPUTS =================
-or_minutes  = input.int(15, "Opening Range Minutes")
-lookback    = input.int(10, "VWAP Cross Lookback")
-
-showFVG     = input.bool(true, "Show FVG")
-fvgLookback = input.int(50, "FVG Lookback")
-showBarColor = input.bool(true, "Show OR Position Colors")
 
 // ================= OR VARIABLES =================
 var float or_high = na
@@ -73,8 +93,8 @@ price_below_or  = or_locked and close < or_low
 price_inside_or = or_locked and not price_above_or and not price_below_or
 
 // ================= TREND (EMA BASED) =================
-ema_fast = ta.ema(close, 20)
-ema_slow = ta.ema(close, 50)
+ema_fast = ta.ema(close, ema_fast_len)
+ema_slow = ta.ema(close, ema_slow_len)
 
 isUptrend   = ema_fast > ema_slow
 isDowntrend = ema_fast < ema_slow
@@ -90,20 +110,15 @@ plot(eightLine, "5m 8 EMA", color=color.yellow, linewidth=2)
 
 
 // ================= EXPANSION =================
-atr_len = input.int(14, "ATR Length")
 atr = ta.atr(atr_len)
 
 current_range = high - low
 expansion_ratio = current_range / atr
 
-is_expanding = expansion_ratio > 1.2
-is_compressed = expansion_ratio < 0.8
+is_expanding  = expansion_ratio > expansion_threshold
+is_compressed = expansion_ratio < compression_threshold
 
 // ================= FVG CLEAN =================
-showOnlyUnfilled = input.bool(true, "Only Unfilled FVG")
-limitRecentFVGs  = input.bool(false, "Limit FVG Count")
-maxFVGCount      = input.int(10, "Max FVG")
-
 bullishFVG = bar_index >= 2 and low > high[2]
 bearishFVG = bar_index >= 2 and high < low[2]
 
@@ -242,8 +257,6 @@ else
     setupColor := color.gray
 
 // ================= INFO PANEL =================
-showPanel = input.bool(true, "Show Info Panel")
-
 if showPanel and barstate.islast
     var table panel = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), border_width=1)
 
