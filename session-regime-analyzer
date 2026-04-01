@@ -331,3 +331,10 @@ barcolor(
          na
      : na
 )
+
+// ================= ALERTS =================
+alertcondition(new_session,          title="Session Start",        message="New session started")
+alertcondition(trend_long_trigger,   title="Trend Long Trigger",   message="Trend Long: pullback to EMA detected, long setup")
+alertcondition(trend_short_trigger,  title="Trend Short Trigger",  message="Trend Short: pullback to EMA detected, short setup")
+alertcondition(range_long,           title="Range Long",           message="Range Long: OR low bounce setup")
+alertcondition(range_short,          title="Range Short",          message="Range Short: OR high rejection setup")
