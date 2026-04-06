@@ -2,78 +2,62 @@
 indicator("Session Regime Analyzer", overlay=true)
 
 // ================= INPUTS =================
-// Session
-session_str = input.string("0930-1600", "Session Hours",    group="Session")
-session_tz  = input.string("America/New_York", "Session Timezone", group="Session")
+session_str = input.string("0930-1600", "Session Hours")
+session_tz  = input.string("America/New_York", "Session Timezone")
 
-// Opening Range
-or_minutes   = input.int(15, "Opening Range Minutes", group="Opening Range")
+or_minutes = input.int(15, "Opening Range Minutes")
 
-// EMA
-ema_fast_len = input.int(20, "EMA Fast Length", minval=1, group="EMA")
-ema_slow_len = input.int(50, "EMA Slow Length", minval=1, group="EMA")
-ema_tf       = input.timeframe("5", "Pullback EMA Timeframe", group="EMA")
+ema_fast_len = input.int(20, "EMA Fast")
+ema_slow_len = input.int(50, "EMA Slow")
+ema_tf       = input.timeframe("5", "Pullback EMA TF")
 
-// ATR / Expansion
-atr_len               = input.int(14,    "ATR Length",               minval=1,   group="ATR / Expansion")
-expansion_threshold   = input.float(1.2, "Expansion Threshold",    minval=0.1, step=0.1, group="ATR / Expansion")
-compression_threshold = input.float(0.8, "Compression Threshold",  minval=0.1, step=0.1, group="ATR / Expansion")
+atr_len = input.int(14, "ATR Length")
 
-// VWAP
-lookback = input.int(10, "VWAP Cross Lookback", group="VWAP")
+vol_sma_len         = input.int(20, "Volume SMA")
+vol_ratio_threshold = input.float(1.5, "Volume Surge")
 
-// Volume
-vol_sma_len         = input.int(20,   "Volume SMA Length",       minval=1,   group="Volume")
-vol_ratio_threshold = input.float(1.5, "Volume Surge Threshold", minval=1.0, step=0.1, group="Volume")
-
-// FVG
-showFVG          = input.bool(true,  "Show FVG",          group="FVG")
-fvgLookback      = input.int(50,     "FVG Lookback",       group="FVG")
-showOnlyUnfilled = input.bool(true,  "Only Unfilled FVG",  group="FVG")
-limitRecentFVGs  = input.bool(false, "Limit FVG Count",    group="FVG")
-maxFVGCount      = input.int(10,     "Max FVG",            group="FVG")
-
-// Display
-showBarColor = input.bool(true, "Show OR Position Colors", group="Display")
-showPanel    = input.bool(true, "Show Info Panel",          group="Display")
-
-// Time-of-Day Filters
-use_time_filter    = input.bool(true,  "Enable Time Filters",      group="Time Filters")
-no_trade_before    = input.int(15,     "No Trade Before (min into session)", minval=0, group="Time Filters")
-no_trade_after     = input.int(30,     "No Trade After  (min before close)", minval=0, group="Time Filters")
-
-// HTF Confluence
-use_htf         = input.bool(true,  "Enable Daily Bias",           group="HTF Confluence")
-htf_ema_len     = input.int(20,     "Daily EMA Length", minval=1,  group="HTF Confluence")
+use_htf     = input.bool(true, "HTF Bias")
+htf_ema_len = input.int(20, "HTF EMA")
 
 // ================= SESSION =================
 in_session  = not na(time(timeframe.period, session_str, session_tz))
 new_session = in_session and not in_session[1]
 
-plotshape(new_session, title="Session Start", style=shape.triangleup, location=location.bottom, color=color.yellow, size=size.small)
-
-// ================= OR VARIABLES =================
+// ================= OR =================
 var float or_high = na
 var float or_low  = na
 var int bar_count = 0
 var bool or_locked = false
-var int start_bar = na
 
-var line high_line = na
-var line low_line  = na
+if new_session
+    or_high := na
+    or_low := na
+    bar_count := 0
+    or_locked := false
+
+if in_session and not or_locked
+    bar_count += 1
+    or_high := na(or_high) ? high : math.max(or_high, high)
+    or_low  := na(or_low)  ? low  : math.min(or_low, low)
+
+bars_needed = math.round(or_minutes / timeframe.multiplier)
+
+if in_session and not or_locked and bar_count >= bars_needed
+    or_locked := true
+
+price_above_or  = close > or_high
+price_below_or  = close < or_low
+price_inside_or = not price_above_or and not price_below_or
 
 // ================= VWAP =================
 vwap = ta.vwap
 weekly_vwap = ta.vwap(hlc3, timeframe.change("W"))
 
-// Weekly Std Deviation
 var float sum_w = 0.0
 var float sum_wx = 0.0
 var float sum_wx2 = 0.0
 
-new_week = timeframe.change("W")
-
-if new_week
+if timeframe.change("W")
     sum_w := 0
     sum_wx := 0
     sum_wx2 := 0
@@ -81,404 +65,120 @@ if new_week
 tp = hlc3
 w = volume
 
-sum_w   += w
-sum_wx  += w * tp
+sum_w += w
+sum_wx += w * tp
 sum_wx2 += w * tp * tp
 
 vw_mean = sum_w > 0 ? sum_wx / sum_w : na
 variance = sum_w > 0 ? (sum_wx2 / sum_w) - (vw_mean * vw_mean) : na
 dev = math.sqrt(variance)
 
-upper_band  = weekly_vwap + dev
-lower_band  = weekly_vwap - dev
 upper_band2 = weekly_vwap + dev * 2
 lower_band2 = weekly_vwap - dev * 2
 
-week_dev = ta.stdev(close, 20)
-weekly_upper_1 = weekly_vwap + week_dev
-weekly_lower_1 = weekly_vwap - week_dev
-weekly_upper_2 = weekly_vwap + week_dev * 2
-weekly_lower_2 = weekly_vwap - week_dev * 2
-
-plot(weekly_vwap, title="Weekly VWAP", color=color.orange, linewidth=2)
-
-plot(upper_band,  title="Weekly Upper 1", color=color.new(color.orange, 70), linewidth=2)
-plot(lower_band,  title="Weekly Lower 1", color=color.new(color.orange, 70), linewidth=2)
-plot(upper_band2, title="Weekly Upper 2", color=color.new(color.red, 70), linewidth=2)
-plot(lower_band2, title="Weekly Lower 2", color=color.new(color.red, 70), linewidth=2)
-
-vwap_cross = ta.cross(close, vwap)
-vwap_cross_count = math.sum(vwap_cross ? 1 : 0, lookback)
+plot(weekly_vwap, color=color.orange, linewidth=2)
+plot(upper_band2, color=color.red)
+plot(lower_band2, color=color.green)
 
 // ================= VWAP REACTION =================
-vwap_react_long = low <= lower_band2 and close > lower_band2 and close > open
-vwap_react_short = high >= upper_band2 and close < upper_band2 and close < open
+vwap_react_long = low <= lower_band2 and close > lower_band2
+vwap_react_short = high >= upper_band2 and close < upper_band2
 
-plotshape(vwap_react_long,  location=location.belowbar, color=color.green, style=shape.triangleup, size=size.tiny, title="VWAP Long React")
-plotshape(vwap_react_short, location=location.abovebar, color=color.red,   style=shape.triangledown, size=size.tiny, title="VWAP Short React")
-// ================= RESET =================
-if new_session
-    or_high   := na
-    or_low    := na
-    bar_count := 0
-    or_locked := false
-    start_bar := bar_index
-
-    if not na(high_line)
-        line.delete(high_line)
-    if not na(low_line)
-        line.delete(low_line)
-
-// ================= BUILD OR =================
-if in_session and not or_locked
-    bar_count += 1
-    or_high := na(or_high) ? high : math.max(or_high, high)
-    or_low  := na(or_low)  ? low  : math.min(or_low, low)
-
-// ================= LOCK OR =================
-bars_needed = timeframe.isminutes ? math.round(or_minutes / timeframe.multiplier) : 1
-
-if in_session and not or_locked and bar_count >= bars_needed
-    or_locked := true
-
-    high_line := line.new(start_bar, or_high, bar_index, or_high, extend=extend.right, color=color.green, width=2)
-    low_line  := line.new(start_bar, or_low,  bar_index, or_low,  extend=extend.right, color=color.red, width=2)
-
-// ================= OR BUILD VISUAL =================
-plot(not or_locked ? or_high : na, color=color.new(color.green, 70))
-plot(not or_locked ? or_low  : na, color=color.new(color.red, 70))
-
-// ================= OR POSITION =================
-price_above_or  = in_session and or_locked and close > or_high
-price_below_or  = in_session and or_locked and close < or_low
-price_inside_or = in_session and or_locked and not price_above_or and not price_below_or
-
-// ================= TREND (EMA BASED) =================
+// ================= EMA =================
 ema_fast = ta.ema(close, ema_fast_len)
 ema_slow = ta.ema(close, ema_slow_len)
 
-isUptrend   = ema_fast > ema_slow
+isUptrend = ema_fast > ema_slow
 isDowntrend = ema_fast < ema_slow
 
-// bgcolor(
-//      showTrendBg and isUptrend ? color.new(color.green, 90) :
-//      showTrendBg and isDowntrend ? color.new(color.red, 90) : na
-// )
+eightLine = request.security(syminfo.tickerid, ema_tf, ta.ema(close, 8))
 
-// ================= 5m 8 EMA =================
-eightLine = request.security(syminfo.tickerid, ema_tf, ta.ema(close, 8), lookahead=barmerge.lookahead_off)
-plot(eightLine, "Pullback EMA", color=color.yellow, linewidth=2)
+// ================= HTF =================
+daily_ema = request.security(syminfo.tickerid, "D", ta.ema(close, htf_ema_len))
+daily_close = request.security(syminfo.tickerid, "D", close)
 
-// ================= HTF CONFLUENCE =================
-daily_ema   = request.security(syminfo.tickerid, "D", ta.ema(close, htf_ema_len), lookahead=barmerge.lookahead_off)
-daily_close = request.security(syminfo.tickerid, "D", close, lookahead=barmerge.lookahead_off)
-daily_ema_slope = daily_ema - daily_ema[3]
-htf_bull = use_htf and daily_close > daily_ema and daily_ema_slope > 0
-htf_bear = use_htf and daily_close < daily_ema and daily_ema_slope < 0
+htf_bull = daily_close > daily_ema
+htf_bear = daily_close < daily_ema
 
-
-// ================= EXPANSION =================
-atr = ta.atr(atr_len)
-
-current_range = high - low
-expansion_ratio = current_range / atr
-
-is_expanding  = expansion_ratio > expansion_threshold
-is_compressed = expansion_ratio < compression_threshold
-
-// ================= FVG CLEAN =================
-bullishFVG = bar_index >= 2 and low > high[2]
-bearishFVG = bar_index >= 2 and high < low[2]
-
-var bullFVGs = array.new_box()
-var bearFVGs = array.new_box()
-
-if bullishFVG and showFVG and in_session
-    b = box.new(bar_index[2], low, bar_index, high[2], bgcolor=color.new(color.green, 80), border_color=na)
-    array.push(bullFVGs, b)
-
-if bearishFVG and showFVG and in_session
-    b = box.new(bar_index[2], low[2], bar_index, high, bgcolor=color.new(color.red, 80), border_color=na)
-    array.push(bearFVGs, b)
-
-// Remove filled
-if showOnlyUnfilled
-    if array.size(bullFVGs) > 0
-        for i = array.size(bullFVGs) - 1 to 0
-            b = array.get(bullFVGs, i)
-            if low <= box.get_top(b)
-                box.delete(b)
-                array.remove(bullFVGs, i)
-
-    if array.size(bearFVGs) > 0
-        for i = array.size(bearFVGs) - 1 to 0
-            b = array.get(bearFVGs, i)
-            if high >= box.get_bottom(b)
-                box.delete(b)
-                array.remove(bearFVGs, i)
-
-// Remove old
-while array.size(bullFVGs) > 0 and bar_index - box.get_left(array.get(bullFVGs, 0)) > fvgLookback
-    box.delete(array.shift(bullFVGs))
-
-while array.size(bearFVGs) > 0 and bar_index - box.get_left(array.get(bearFVGs, 0)) > fvgLookback
-    box.delete(array.shift(bearFVGs))
-
-// Limit count
-if limitRecentFVGs
-    while array.size(bullFVGs) > maxFVGCount
-        box.delete(array.shift(bullFVGs))
-    while array.size(bearFVGs) > maxFVGCount
-        box.delete(array.shift(bearFVGs))
-
-// Extend
-if array.size(bullFVGs) > 0
-    for i = 0 to array.size(bullFVGs) - 1
-        box.set_right(array.get(bullFVGs, i), bar_index)
-
-if array.size(bearFVGs) > 0
-    for i = 0 to array.size(bearFVGs) - 1
-        box.set_right(array.get(bearFVGs, i), bar_index)
-
-// ================= VOLUME RATIO =================
-vol_sma   = ta.sma(volume, vol_sma_len)
+// ================= VOLUME =================
+vol_sma = ta.sma(volume, vol_sma_len)
 vol_ratio = vol_sma > 0 ? volume / vol_sma : 1.0
 vol_surge = vol_ratio >= vol_ratio_threshold
 
-// ================= TREND SCORE =================
-// Signed score: positive = bullish conviction, negative = bearish conviction
+// ================= SCORE =================
+score = 0
+score := score + (close > vwap ? 20 : -20)
+score := score + (price_above_or ? 20 : price_below_or ? -20 : 0)
+score := score + (isUptrend ? 20 : isDowntrend ? -20 : 0)
+score := score + (vol_surge ? 10 : 0)
+score := score + (htf_bull ? 10 : htf_bear ? -10 : 0)
 
-// VWAP component  (+/-25)
-vwap_score = 0.0
-if close > vwap and ema_fast > vwap
-    vwap_score := 25
-else if close < vwap and ema_fast < vwap
-    vwap_score := -25
-cross_penalty = math.min(vwap_cross_count, 10)
-if close > vwap
-    vwap_score -= cross_penalty
-else if close < vwap
-    vwap_score += cross_penalty
+smoothed_score = ta.ema(score, 5)
 
-// OR component  (+/-25)
-or_score = 0.0
-if price_above_or
-    or_score := 25
-else if price_below_or
-    or_score := -25
-
-// Expansion component  (+/-25)
-expansion_score = 0.0
-if is_expanding
-    expansion_score := close > vwap ? 25 : -25
-else if is_compressed
-    expansion_score := -10
-
-// Momentum  (+/-25)
-ema_slope = ema_fast - ema_fast[5]
-momentum_score = 0.0
-if math.abs(ema_slope) > atr * 0.1
-    momentum_score := ema_slope > 0 ? 25 : -25
-
-// Volume  (+/-10)
-volume_score = 0.0
-if vol_surge
-    volume_score := close > vwap ? 10 : -10
-
-// HTF Confluence  (+/-10)
-htf_score = 0.0
-if use_htf
-    htf_score := htf_bull ? 10 : htf_bear ? -10 : 0
-
-// Total  (range: approximately -120 to +120, clamped to -100/+100)
-raw_score    = vwap_score + or_score + expansion_score + momentum_score + volume_score + htf_score
-trend_score  = math.max(-100, math.min(100, raw_score))
-
-// Smooth
-smoothed_score = ta.ema(trend_score, 5)
-
-// ================= CONFIDENCE =================
-confidence =
-     math.abs(smoothed_score) > 80 ? "HIGH" :
-     math.abs(smoothed_score) > 60 ? "MED"  :
-     "LOW"
-
-confidenceColor =
-     math.abs(smoothed_score) > 80 ? color.green :
-     math.abs(smoothed_score) > 60 ? color.orange :
-     color.gray
-
-// Show label on last bar only
-var label confLabel = na
-
-if barstate.islast
-    if not na(confLabel)
-        label.delete(confLabel)
-
-    confLabel := label.new(
-         bar_index,
-         high + atr * 0.5,
-         "Confidence: " + confidence,
-         style=label.style_label_down,
-         textcolor=color.white,
-         color=confidenceColor,
-         size=size.small
-    )
-
-// Regime
+// ================= REGIME =================
 is_trend = math.abs(smoothed_score) > 60
 is_range = math.abs(smoothed_score) < 40
-is_bull  = smoothed_score > 0
-is_bear  = smoothed_score < 0
-
-trend_strength = math.abs(smoothed_score) > 80 ? "Strong"   :
-                 math.abs(smoothed_score) > 60 ? "Moderate" :
-                 math.abs(smoothed_score) < 20 ? "Dead"     :
-                 math.abs(smoothed_score) < 40 ? "Weak"     : "Neutral"
-
-// Plot score
-plot(smoothed_score, "Trend Score", color=color.white)
-
-// ================= TIME-OF-DAY FILTER =================
-// bars_into_session and bars_to_close are only meaningful in minute timeframes
-bars_per_min  = timeframe.isminutes ? timeframe.multiplier : 1
-bars_in_sess  = na(start_bar) ? 0 : bar_index - start_bar
-
-session_duration_bars = timeframe.isminutes ? math.round(390 / timeframe.multiplier) : 1  // 390 min = 6.5 hr NYSE session
-early_bars  = math.round(no_trade_before / bars_per_min)
-late_cutoff = session_duration_bars - math.round(no_trade_after / bars_per_min)
-
-too_early   = use_time_filter and in_session and bars_in_sess < early_bars
-too_late    = use_time_filter and in_session and bars_in_sess >= late_cutoff
-time_ok     = not too_early and not too_late
-
-// ================= DEAD ZONE =================
 in_dead_zone = math.abs(smoothed_score) < 15
 
-// ================= ENTRY LOGIC =================
+// ================= CHECKLIST =================
+sweep_high = high > high[1]
+sweep_low  = low < low[1]
 
-// ===== TREND ENTRIES =====
-trend_long  = is_trend and is_bull and price_above_or and close > vwap and is_expanding and math.abs(smoothed_score) > 75 and time_ok
-trend_short = is_trend and is_bear and price_below_or and close < vwap and is_expanding and math.abs(smoothed_score) > 75 and time_ok
+bull_engulf = close > high[1]
+bear_engulf = close < low[1]
 
-// pullback confirmation + continuation candle (close > high[1] / close < low[1])
-trend_long_trigger  = trend_long  and low  <= eightLine and close > open and close > high[1]
-trend_short_trigger = trend_short and high >= eightLine and close < open and close < low[1]
+check_sweep = sweep_high or sweep_low
+check_reaction = bull_engulf or bear_engulf
+check_trend = is_trend or is_range
+check_volume = vol_surge
+check_vwap = is_range and (vwap_react_long or vwap_react_short)
+check_sweep_5m   = request.security(syminfo.tickerid, "5", check_sweep, lookahead=barmerge.lookahead_off)
+check_react_5m   = request.security(syminfo.tickerid, "5", check_reaction, lookahead=barmerge.lookahead_off)
+check_trend_5m   = request.security(syminfo.tickerid, "5", check_trend, lookahead=barmerge.lookahead_off)
+check_volume_5m  = request.security(syminfo.tickerid, "5", check_volume, lookahead=barmerge.lookahead_off)
+check_vwap_5m    = request.security(syminfo.tickerid, "5", check_vwap, lookahead=barmerge.lookahead_off)
 
-// ===== RANGE ENTRIES (reclaim logic) =====
-range_long  = is_range and not in_dead_zone and low < or_low  and close > or_low  and time_ok
-range_short = is_range and not in_dead_zone and high > or_high and close < or_high and time_ok
+check_score = (check_sweep_5m ? 1 : 0) + (check_react_5m ? 1 : 0) + (check_trend_5m ? 1 : 0) + (check_volume_5m ? 1 : 0) + (check_vwap_5m ? 1 : 0)
 
-plotshape(range_long,  title="Range Long",  style=shape.labelup,   location=location.belowbar, color=color.teal,   textcolor=color.white, text="RL", size=size.small)
-plotshape(range_short, title="Range Short", style=shape.labeldown, location=location.abovebar, color=color.orange, textcolor=color.white, text="RS", size=size.small)
+valid_setup = check_score >= 3
 
-// ===== SETUP RECOMMENDATION =====
-setupText  = smoothed_score > 60  ? (price_above_or ? "Trend → Wait Pullback, LONG"  : "Trend → Wait OR Break") :
-             smoothed_score < -60 ? (price_below_or ? "Trend → Wait Pullback, SHORT" : "Trend → Wait OR Break") :
-             math.abs(smoothed_score) < 40 ?
-                 (price_inside_or ? "Range → Wait Edges" :
-                  price_below_or  ? "Range → Wait Bounce, SHORT"        :
-                  price_above_or  ? "Range → Wait Pullback, LONG"       : "Wait") : "No Trade"
+// ================= ENTRIES =================
+range_long = is_range and not in_dead_zone and low < or_low and close > or_low and valid_setup
+range_short = is_range and not in_dead_zone and high > or_high and close < or_high and valid_setup
 
-setupColor = smoothed_score > 60  ? color.green  :
-             smoothed_score < -60 ? color.red     :
-             math.abs(smoothed_score) < 40 ? color.teal : color.gray
+plotshape(range_long, location=location.belowbar, color=color.green, text="RL")
+plotshape(range_short, location=location.abovebar, color=color.red, text="RS")
 
-// ================= INFO PANEL =================
-// Declared at top-level scope so Pine Script initializes the table exactly once
-// (placing `var table` inside a conditional can cause reset on the first matching bar).
-var table panel = table.new(position.top_right, 2, 11, bgcolor=color.new(color.black, 80), border_width=1)
+// ================= CHECKLIST PANEL =================
+var table checklist = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 80), border_width=1)
 
-if showPanel and barstate.islast
-
-    // ===== Colors =====
+if barstate.islast
     headerBg = color.new(color.gray, 85)
     rowBg1   = color.new(color.black, 85)
     rowBg2   = color.new(color.black, 75)
 
-    // ===== Alignment =====
     align = text.align_left
 
+    // Header
+    table.cell(checklist, 0, 0, "Checklist", text_color=color.white, bgcolor=headerBg, text_halign=align)
+    table.cell(checklist, 1, 0, "Status",   text_color=color.white, bgcolor=headerBg, text_halign=align)
 
-    // ===== REGIME TEXT =====
-    regimeText  = is_trend ? (is_bull ? "Trend ▲" : "Trend ▼") : is_range ? "Chop" : "Neutral"
-    regimeColor = is_trend ? (is_bull ? color.green : color.red) : is_range ? color.orange : color.gray
+    // Sweep
+    table.cell(checklist, 0, 1, "Sweep", bgcolor=rowBg1, text_halign=align)
+    table.cell(checklist, 1, 1, check_sweep_5m ? "✔" : "✖", text_color=check_sweep ? color.green : color.red, bgcolor=rowBg1)
 
-    // ===== VWAP STATE =====
-    vwapState = close > vwap ? "Above" : "Below"
+    // Reaction
+    table.cell(checklist, 0, 2, "Reaction", bgcolor=rowBg2, text_halign=align)
+    table.cell(checklist, 1, 2, check_react_5m ? "✔" : "✖", text_color=check_reaction ? color.green : color.red, bgcolor=rowBg2)
 
-    // ===== OR POSITION =====
-    orState = price_above_or ? "Above" :
-              price_below_or ? "Below" : "Inside"
+    // Trend
+    table.cell(checklist, 0, 3, "Trend", bgcolor=rowBg1, text_halign=align)
+    table.cell(checklist, 1, 3, check_trend_5m ? "✔" : "✖", text_color=check_trend ? color.green : color.red, bgcolor=rowBg1)
 
-    // ===== EXPANSION =====
-    expansionState = is_expanding ? "Expanding" :
-                     is_compressed ? "Compressed" : "Normal"
+    // Volume
+    table.cell(checklist, 0, 4, "Volume", bgcolor=rowBg2, text_halign=align)
+    table.cell(checklist, 1, 4, check_volume_5m ? "✔" : "✖", text_color=check_volume ? color.green : color.red, bgcolor=rowBg2)
 
-    // ===== HEADER =====
-    table.cell(panel, 0, 0, "Metric", text_color=color.white, bgcolor=headerBg, text_halign=align)
-    table.cell(panel, 1, 0, "Value",  text_color=color.white, bgcolor=headerBg, text_halign=align)
-
-    // ===== SCORE =====
-    scoreColor = smoothed_score > 60 ? color.green : smoothed_score < -60 ? color.red : smoothed_score > 0 ? color.lime : smoothed_score < 0 ? color.orange : color.gray
-    table.cell(panel, 0, 1, "Score", text_halign=align, bgcolor=rowBg1)
-    table.cell(panel, 1, 1, str.tostring(math.round(smoothed_score)), text_color=scoreColor, text_halign=align, bgcolor=rowBg1)
-
-    // ===== STRENGTH =====
-    strengthColor = math.abs(smoothed_score) > 80 ? color.green : math.abs(smoothed_score) > 60 ? color.lime : math.abs(smoothed_score) < 20 ? color.red : math.abs(smoothed_score) < 40 ? color.orange : color.gray
-    table.cell(panel, 0, 2, "Strength", text_halign=align, bgcolor=rowBg2)
-    table.cell(panel, 1, 2, trend_strength, text_color=strengthColor, text_halign=align, bgcolor=rowBg2)
-
-    // ===== REGIME =====
-    table.cell(panel, 0, 3, "Regime", text_halign=align, bgcolor=rowBg1)
-    table.cell(panel, 1, 3, regimeText, text_color=regimeColor, text_halign=align, bgcolor=rowBg1)
-
-    // ===== VWAP =====
-    table.cell(panel, 0, 4, "VWAP", text_halign=align, bgcolor=rowBg2)
-    table.cell(panel, 1, 4, vwapState, text_color=color.blue, text_halign=align, bgcolor=rowBg2)
-
-    // ===== OR POSITION =====
-    table.cell(panel, 0, 5, "OR Pos", text_halign=align, bgcolor=rowBg1)
-    table.cell(panel, 1, 5, orState, text_halign=align, bgcolor=rowBg1)
-
-    // ===== EXPANSION =====
-    table.cell(panel, 0, 6, "Expansion", text_halign=align, bgcolor=rowBg2)
-    table.cell(panel, 1, 6, expansionState, text_halign=align, bgcolor=rowBg2)
-
-    // ===== SETUP =====
-    table.cell(panel, 0, 7, "Setup", text_halign=align, bgcolor=rowBg1)
-    table.cell(panel, 1, 7, setupText, text_color=setupColor, text_halign=align, bgcolor=rowBg1)
-
-    // ===== VOLUME =====
-    volColor = vol_surge ? color.green : color.gray
-    table.cell(panel, 0, 8, "Vol Ratio", text_halign=align, bgcolor=rowBg2)
-    table.cell(panel, 1, 8, str.tostring(math.round(vol_ratio * 100) / 100), text_color=volColor, text_halign=align, bgcolor=rowBg2)
-
-    // ===== TIME FILTER =====
-    timeFilterText  = too_early ? "Too Early" : too_late ? "Too Late" : use_time_filter ? "OK" : "Off"
-    timeFilterColor = too_early or too_late ? color.orange : use_time_filter ? color.green : color.gray
-    table.cell(panel, 0, 9, "Time", text_halign=align, bgcolor=rowBg1)
-    table.cell(panel, 1, 9, timeFilterText, text_color=timeFilterColor, text_halign=align, bgcolor=rowBg1)
-
-    // ===== DAILY BIAS =====
-    dailyBiasText  = not use_htf ? "Off" : htf_bull ? "Bullish" : htf_bear ? "Bearish" : "Neutral"
-    dailyBiasColor = not use_htf ? color.gray : htf_bull ? color.green : htf_bear ? color.red : color.gray
-    table.cell(panel, 0, 10, "Daily Bias", text_halign=align, bgcolor=rowBg2)
-    table.cell(panel, 1, 10, dailyBiasText, text_color=dailyBiasColor, text_halign=align, bgcolor=rowBg2)
-
-// ================= BAR COLOR =================
-barcolor(
-     showBarColor and in_session and or_locked ?
-         price_above_or ? color.green :
-         price_below_or ? color.red :
-         price_inside_or ? color.gray :
-         na
-     : na
-)
-
-// ================= ALERTS =================
-alertcondition(new_session,          title="Session Start",        message="New session started")
-alertcondition(trend_long_trigger,   title="Trend Long Trigger",   message="Trend Long: pullback to EMA detected, long setup")
-alertcondition(trend_short_trigger,  title="Trend Short Trigger",  message="Trend Short: pullback to EMA detected, short setup")
-alertcondition(range_long,           title="Range Long",           message="Range Long: OR low bounce setup")
-alertcondition(range_short,          title="Range Short",          message="Range Short: OR high rejection setup")
+    // VWAP
+    table.cell(checklist, 0, 5, "VWAP React", bgcolor=rowBg1, text_halign=align)
+    table.cell(checklist, 1, 5, check_vwap_5m ? "✔" : "✖", text_color=check_vwap ? color.green : color.red, bgcolor=rowBg1)
