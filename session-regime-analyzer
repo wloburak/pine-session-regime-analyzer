@@ -142,6 +142,22 @@ check_score = (check_sweep_5m ? 1 : 0) + (check_react_5m ? 1 : 0) + (check_trend
 
 valid_setup = check_score >= 3
 
+// ================= OR LINES =================
+var line or_high_line = na
+var line or_low_line  = na
+
+// Delete old lines on new session
+if new_session
+    if not na(or_high_line)
+        line.delete(or_high_line)
+    if not na(or_low_line)
+        line.delete(or_low_line)
+
+// Draw lines when OR locks
+if or_locked and not or_locked[1]
+    or_high_line := line.new(bar_index, or_high, bar_index + 1, or_high, extend=extend.right, color=color.green, width=2)
+    or_low_line  := line.new(bar_index, or_low,  bar_index + 1, or_low,  extend=extend.right, color=color.red,   width=2)
+
 // ================= ENTRIES =================
 range_long = is_range and not in_dead_zone and low < or_low and close > or_low and valid_setup
 range_short = is_range and not in_dead_zone and high > or_high and close < or_high and valid_setup
